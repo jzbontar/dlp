@@ -1,0 +1,37 @@
+start training phase
+Epoch 0 train_err=0.90014 test_err=0.9005
+Epoch 1 train_err=0.4788 test_err=0.4875
+Epoch 2 train_err=0.37642 test_err=0.399
+Epoch 3 train_err=0.33686 test_err=0.3699
+Epoch 4 train_err=0.3017 test_err=0.3451
+Epoch 5 train_err=0.26936 test_err=0.3257
+Epoch 6 train_err=0.2507 test_err=0.3182
+Epoch 7 train_err=0.24108 test_err=0.3222
+Epoch 8 train_err=0.24812 test_err=0.338
+Adjusted Learning Rate for 1 time, LR = 0.001   
+Epoch 9 train_err=0.16186 test_err=0.2848
+Epoch 10 train_err=0.15282 test_err=0.2804
+Epoch 11 train_err=0.1473 test_err=0.2789
+Epoch 12 train_err=0.1424 test_err=0.279
+Epoch 13 train_err=0.13844 test_err=0.2785
+Epoch 14 train_err=0.13476 test_err=0.2778
+Epoch 15 train_err=0.13106 test_err=0.278
+Epoch 16 train_err=0.12838 test_err=0.2778
+Epoch 17 train_err=0.12454 test_err=0.2784
+Adjusted Learning Rate for 2 time, LR = 0.0001  
+Epoch 18 train_err=0.11496 test_err=0.2734
+Epoch 19 train_err=0.11374 test_err=0.2738
+Epoch 20 train_err=0.11294 test_err=0.2736
+Epoch 21 train_err=0.11228 test_err=0.2739
+Adjusted Learning Rate for 3 time, LR = 1e-05   
+Epoch 22 train_err=0.11202 test_err=0.2732
+Epoch 23 train_err=0.1117 test_err=0.2734
+Epoch 24 train_err=0.11164 test_err=0.2737
+      Time     Calls       Avg       Min       Max  Name
+  763.3519         1  763.3519  763.3519  763.3519  train
+  526.5309        24   21.9388   21.9099   21.9781  epoch
+  526.5150      9384    0.0561    0.0284    0.0755  batch
+  227.1728        24    9.4655    9.4276    9.8681  evaluate
+    0.7684         1    0.7684    0.7684    0.7684  load
+    0.4582         1    0.4582    0.4582    0.4582  model
+
