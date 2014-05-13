@@ -10,16 +10,17 @@ require 'prof-torch'
 cutorch.setDevice(1)
 torch.manualSeed(42)
 
-Nepoch = Nepoch or 10
+Nepoch = Nepoch or 3
 batch_size = 128
 lambda_l1= 0.001 -- lambda. Beta=1
-LR = 0.01 -- learning rate
+LR = 0.00001 -- learning rate
 Wdecay = 0.0005
 
 prof.tic('load')
 --X,Y = torch_datasets:cifar(3)
 X = torch.FloatTensor(torch.FloatStorage('/home/tom/datasets/cifar_whitened/X')):resize(60000, 3, 32, 32):cuda()
-N = 50000
+--N = N or 50000
+N = N or 1024
 X = X[{{1,N}}]
 prof.toc('load')
 
@@ -57,6 +58,17 @@ l1cost = nn.L1CostMan():cuda()
 --end
 -- print(('Number of layers with parameters: %d'):format(#layers))
 
+function plotweights(filename, wt)
+    local table = {}
+    for i = 1,wt:size()[1] do
+        for j = 1,wt:size()[2] do 
+            table[#table+1] = wt[{i,j}]
+        end
+    end
+    image.save(filename, image.toDisplayTensor(table, 2, torch.floor(torch.sqrt(#table))))
+end
+
+print('train')
 prof.tic('train')
 epar, egpar = enc:getParameters()
 emom = egpar:clone():zero()
@@ -81,6 +93,7 @@ for epoch = 1,Nepoch do
       l1_tot = l1_tot + l1cost:forward(enc_sparse.output)
       l1cost:backward(enc_sparse.output)
       enc_sparse:backward(enc.output, l1cost.gradInput)
+      --print ('l1 gradInput: ' .. l1cost.gradInput:abs():mean() .. ' / maxpool gradInput: ' .. enc_sparse.gradInput:abs():mean())
 
       dec:forward(enc.output)
       recout = dec.output:narrow(2, 1, 3) -- select first 3 maps from 16   
@@ -90,9 +103,10 @@ for epoch = 1,Nepoch do
 
       loss = reconstruct_cost.output + lambda_l1 * l1cost.output
 
-      --print('sp '.. enc_sparse.gradInput:mean() .. ', rec ' .. dec.gradInput:mean())
+      --print('sp '.. enc_sparse.gradInput:abs():mean() .. ', rec ' .. dec.gradInput:abs():mean())
       -- combine l1 and reconstruction backprop
-      gradInput = enc_sparse.gradInput:add(dec.gradInput)
+      --gradInput = enc_sparse.gradInput:add(dec.gradInput)
+      gradInput = dec.gradInput:add(lambda_l1, enc_sparse.gradInput)
       enc:backward(X_batch, gradInput)
       
       -- Momentum and weight decay                                                                              
@@ -107,11 +121,12 @@ for epoch = 1,Nepoch do
 
       prof.toc('batch')
    end
-   print('gradInputs: sp '.. enc_sparse.gradInput:mean() .. ', rec ' .. dec.gradInput:mean())
-   print('average enc weight: ' .. epar:mean() .. ' / average dec weight: ' .. dpar:mean())
-   print('epoch ' .. epoch .. ', time ' .. prof.time() - tic .. ', L1 ' .. l1_tot .. ', reconstr ' .. rec_tot )
+   print(string.format('gradInputs: sp %.4f / rec %.4f' , enc_sparse.gradInput:abs():mean(), dec.gradInput:abs():mean()))
+   print(string.format('average enc weight: %.4f / average dec weight: %.4f',epar:abs():mean(), dpar:abs():mean()))
+   print(string.format('epoch %d, time %.2f, L1 %.2f, reconstr %.2f', epoch, prof.time()-tic, l1_tot, rec_tot))
    wt = enc:get(1):parameters()[1]
-   image.save('filters_' .. epoch .. '.jpg', image.toDisplayTensor({wt[1], wt[2], wt[3]}, 2, 14))
+   --image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
+   plotweights(string.format('filters_%03d.jpg', epoch), wt)
    prof.toc('epoch')
 end
 prof.toc('train')
