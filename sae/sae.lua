@@ -6,37 +6,43 @@ require 'nn'
 --require 'jzt'
 require 'L1CostMan'
 require 'prof-torch'
+prof.clear()
 
 cutorch.setDevice(1)
 torch.manualSeed(42)
 
-Nepoch = Nepoch or 3
-batch_size = 128
-lambda_l1= 0.001 -- lambda. Beta=1
-LR = 0.00001 -- learning rate
-Wdecay = 0.0005
+nhidden = 32
+batch_size = 16
+lambda_l1= 0 -- 1e-5 --0.0001 -- lambda. Beta=1
+
+--LR = 5e-6 -- learning rate
+lrd = 5e-4
+lre = 5e-4
 
 prof.tic('load')
 --X,Y = torch_datasets:cifar(3)
 X = torch.FloatTensor(torch.FloatStorage('/home/tom/datasets/cifar_whitened/X')):resize(60000, 3, 32, 32):cuda()
---N = N or 50000
-N = N or 1024
+collectgarbage() -- in case of re-run several times
+
+N = N or 50000
+--N = N or 10240
+Nepoch = Nepoch or 9
 X = X[{{1,N}}]
 prof.toc('load')
 
 enc = nn.Sequential{bprop_min=1}
-enc:add(nn.SpatialConvolutionRing2(3, 64, 5, 5))
+enc:add(nn.SpatialConvolutionRing2(3, 32, 5, 5))
 enc:add(nn.Threshold())
 enc:cuda()
 
 enc_sparse = nn.Sequential()
---enc_sparse:add(nn.SpatialLPPooling(64, 2, 2, 2, 2, 2)) -- gives nans
+--enc_sparse:add(nn.SpatialLPPooling(32, 2, 2, 2, 2, 2)) -- gives nans
 enc_sparse:add(nn.SpatialMaxPooling(2,2,2,2))
 enc_sparse:cuda()
 
 dec = nn.Sequential()
 dec:add(nn.SpatialZeroPadding(4, 4, 4, 4))
-dec:add(nn.SpatialConvolutionRing2(64, 16, 5, 5))
+dec:add(nn.SpatialConvolutionRing2(32, 16, 5, 5))
 -- note: 16 because Ring2 requires it. only first 3 are used.
 dec:cuda()
 
@@ -60,9 +66,15 @@ l1cost = nn.L1CostMan():cuda()
 
 function plotweights(filename, wt)
     local table = {}
+    local sca = torch.Tensor(20,20)
     for i = 1,wt:size()[1] do
         for j = 1,wt:size()[2] do 
-            table[#table+1] = wt[{i,j}]
+            for k = 1,wt:size(3) do
+                for l = 1,wt:size()[4] do
+                    sca[{{k*4-3,k*4},{l*4-3,l*4}}] = wt[{i,j,k,l}]
+                end
+            end
+            table[#table+1] = sca:clone()
         end
     end
     image.save(filename, image.toDisplayTensor(table, 2, torch.floor(torch.sqrt(#table))))
@@ -71,63 +83,101 @@ end
 print('train')
 prof.tic('train')
 epar, egpar = enc:getParameters()
-emom = egpar:clone():zero()
 dpar, dgpar = dec:getParameters()
-dmom = dgpar:clone():zero()
+print(egpar:size())
+print(dgpar:size())
+lam_heur = {}
+lrd_heur = {}
+lre_heur = {}
+introsp = false
+
+
+wt = enc:get(1):parameters()[1]
+--image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
+plotweights(string.format('filters_%03d.png', 0), wt)
 for epoch = 1,Nepoch do
    -- train
    tic= prof.time()
    prof.tic('epoch')
-   l1_tot = 0
-   rec_tot = 0
+   l1_coll = {}
+   rec_coll = {}
+   units_on = {}
    for t = 1,N- batch_size, batch_size do
       prof.tic('batch')
       X_batch = X:narrow(1, t, batch_size)
-      enc:zeroGradParameters()
+      --enc:zeroGradParameters()
       --enc_sparse:zeroGradParameters() -- has no params
-      dec:zeroGradParameters()
+      --dec:zeroGradParameters()
+      egpar:zero()
+      dgpar:zero()
 
       enc:forward(X_batch)
+      if introsp then
+          units_on[#units_on + 1] = torch.sign(enc.output:double()):sum() / enc.output:nElement()
+      end
 
       enc_sparse:forward(enc.output)
-      l1_tot = l1_tot + l1cost:forward(enc_sparse.output)
+      l1cost:forward(enc_sparse.output)
+      l1_coll[#l1_coll + 1] = l1cost.output/enc_sparse.output:nElement()
       l1cost:backward(enc_sparse.output)
       enc_sparse:backward(enc.output, l1cost.gradInput)
-      --print ('l1 gradInput: ' .. l1cost.gradInput:abs():mean() .. ' / maxpool gradInput: ' .. enc_sparse.gradInput:abs():mean())
+      -- DONTUSE print ('l1 gradInput: ' .. l1cost.gradInput:abs():mean() .. ' / maxpool gradInput: ' .. enc_sparse.gradInput:abs():mean())
 
       dec:forward(enc.output)
-      recout = dec.output:narrow(2, 1, 3) -- select first 3 maps from 16   
-      rec_tot = rec_tot + reconstruct_cost:forward(recout, X_batch)
+      recout = dec.output:narrow(2, 1, 3) -- select first 3 nfmaps from 16   
+      reconstruct_cost:forward(recout, X_batch)
+      rec_coll[#rec_coll + 1] = reconstruct_cost.output
       reconstruct_cost:backward(recout, X_batch)
       dec:backward(enc.output, reconstruct_cost.gradInput)
 
-      loss = reconstruct_cost.output + lambda_l1 * l1cost.output
+      -- based on current input gradients and param size / gradients, get heuristic LR and lambda
+      if introsp then 
+          lam_heur[#lam_heur+1] = torch.abs(dec.gradInput:double()):mean() / torch.abs(enc_sparse.gradInput:double()):mean()
+          lrd_heur[#lrd_heur+1] = 0.01 * torch.abs(dpar:double()):mean() / torch.abs(dgpar:double()):mean()
+          --print('Reasonable lambda: ', lam_heur[#lam_heur])
+          --print('Reasonable LR dec: ', lrd_heur[#lrd_heur])
+      end
 
-      --print('sp '.. enc_sparse.gradInput:abs():mean() .. ', rec ' .. dec.gradInput:abs():mean())
+      -- DONTUSE print('sp '.. enc_sparse.gradInput:abs():mean() .. ', rec ' .. dec.gradInput:abs():mean())
       -- combine l1 and reconstruction backprop
       --gradInput = enc_sparse.gradInput:add(dec.gradInput)
-      gradInput = dec.gradInput:add(lambda_l1, enc_sparse.gradInput)
+      --gradInput = dec.gradInput:add(lambda_l1, enc_sparse.gradInput)
+      gradInput = dec.gradInput
       enc:backward(X_batch, gradInput)
-      
-      -- Momentum and weight decay                                                                              
-      emom:mul(0.9)                                                                                         
-      --emom:add(-Wdecay*alpha, epar) --weight decay on encoder doesnt make sense
-      emom:add(-LR, egpar) 
-      epar:add(emom)
-      dmom:mul(0.9)
-      dmom:add(-LR*Wdecay, dpar)
-      dmom:add(-LR,dgpar)
-      dpar:add(dmom)
+      if introsp then
+          lre_heur[#lre_heur+1] = 0.01 * torch.abs(epar:double()):mean() / torch.abs(egpar:double()):mean()
+          --print('Reasonable LR enc: ', lre_heur[#lre_heur])
+      end
+
+      -- update parameters
+      epar:add(-lre, egpar)
+      dpar:add(-lrd, dgpar)
+      --epar:add(1,torch.CudaTensor(2432):normal())
+      --dpar:add(1,torch.CudaTensor(12816):normal())
+      --print(reconstruct_cost.output, torch.abs(egpar:double()):mean(), torch.abs(dgpar:double()):mean())
+
+      -- normalize decoder kernels
+      wt = dec:get(2).weight
+      for nfmap = 1,nhidden do
+          wt[{{1,3},nfmap}]:div(wt[{{1,3},nfmap}]:norm(2))
+      end
 
       prof.toc('batch')
    end
-   print(string.format('gradInputs: sp %.4f / rec %.4f' , enc_sparse.gradInput:abs():mean(), dec.gradInput:abs():mean()))
-   print(string.format('average enc weight: %.4f / average dec weight: %.4f',epar:abs():mean(), dpar:abs():mean()))
-   print(string.format('epoch %d, time %.2f, L1 %.2f, reconstr %.2f', epoch, prof.time()-tic, l1_tot, rec_tot))
-   wt = enc:get(1):parameters()[1]
-   --image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
-   plotweights(string.format('filters_%03d.jpg', epoch), wt)
    prof.toc('epoch')
+   print(string.format('epoch %d, time %.2f, L1 %.2f, reconstr %.2f', epoch, prof.time()-tic, torch.Tensor(l1_coll):mean(), torch.Tensor(rec_coll):mean()))
+   print(string.format('gradInputs: sp %.4f / rec %.4f', torch.abs(enc_sparse.gradInput:double()):mean(), torch.abs(dec.gradInput:double()):mean()))
+   print(string.format('average enc weight: %.4f / average dec weight: %.4f',torch.abs(epar:double()):mean(), torch.abs(dpar:double()):mean()))
+   if introsp then
+       print(string.format('Heuristics: lambda %.6f / enc LR %.6f / dec LR %.6f, units on %.4f',torch.Tensor(lam_heur)[{{-30,-1}}]:mean(),torch.Tensor(lre_heur)[{{-30,-1}}]:mean(),torch.Tensor(lrd_heur)[{{-40,-1}}]:mean(), torch.Tensor(units_on):mean()))
+   end
+   --print(dec:get(2).weight[{1,1}])
+   print("=====")
+   --image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
+   wt = enc:get(1):parameters()[1]
+   plotweights(string.format('filters_%03d.png', epoch), wt)
+   image.save(string.format('orig_%02d.png',epoch), image.toDisplayTensor(X_batch,2))
+   image.save(string.format('reco_%02d.png',epoch), image.toDisplayTensor(recout,2))
 end
 prof.toc('train')
 prof.dump()

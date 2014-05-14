@@ -6,6 +6,7 @@ end
 
 function L1CostMan:updateOutput(input)
    self.output = input:norm(1) -- implemented in torch / cutorch
+   self.output = self.output --/ input:nElement()
    return self.output
 end
 
