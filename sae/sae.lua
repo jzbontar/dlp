@@ -9,24 +9,24 @@ require 'prof-torch'
 prof.clear()
 
 cutorch.setDevice(1)
-torch.manualSeed(42)
+torch.manualSeed(23442)
 
 nhidden = 32
 batch_size = 16
-lambda_l1= 1e-5 --0.0001 -- lambda. Beta=1
+lambda_l1= 1e-4 --0.0001 -- lambda. Beta=1
 
 --LR = 5e-6 -- learning rate
-lre = 1e-3
-lrd = 1e-2
+lre = 5e-2
+lrd = 5e-1
 
 prof.tic('load')
 --X,Y = torch_datasets:cifar(3)
 X = torch.FloatTensor(torch.FloatStorage('/home/tom/datasets/cifar_whitened/X')):resize(60000, 3, 32, 32):cuda()
 collectgarbage() -- in case of re-run several times
 
---N = N or 50000
-N = N or 10240
-Nepoch = Nepoch or 9
+N = N or 50000
+--N = N or 10240
+Nepoch = Nepoch or 20
 X = X[{{1,N}}]
 prof.toc('load')
 
@@ -109,7 +109,8 @@ introsp = true
 
 wt = enc:get(1).weight
 --image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
-plotweights(string.format('filters_%03d.png', 0), wt)
+plotweights(string.format('enc_filt_%03d.png', 0), enc:get(1).weight)
+plotweights(string.format('dec_filt_%03d.png', 0), dec:get(1).weight)
 for epoch = 1,Nepoch do
    -- train
    tic= prof.time()
@@ -180,8 +181,8 @@ for epoch = 1,Nepoch do
       prof.toc('batch')
    end
    prof.toc('epoch')
-   print(string.format('epoch %d, time %.2f, L1 %.2f, reconstr %.2f', epoch, prof.time()-tic, torch.Tensor(l1_coll):mean(), torch.Tensor(rec_coll):mean()))
-   print(string.format('gradInputs: sp %.4f / rec %.4f', torch.abs(enc_sparse.gradInput:double()):mean(), torch.abs(dec.gradInput:double()):mean()))
+   print(string.format('epoch %d, time %.2f, L1 %.5f, reconstr %.5f', epoch, prof.time()-tic, torch.Tensor(l1_coll):mean(), torch.Tensor(rec_coll):mean()))
+   print(string.format('gradInputs: sp %.4e / rec %.4e', torch.abs(enc_sparse.gradInput:double()):mean(), torch.abs(dec.gradInput:double()):mean()))
    print(string.format('average enc weight: %.4f / average dec weight: %.4f',torch.abs(epar:double()):mean(), torch.abs(dpar:double()):mean()))
    if introsp then
        print(string.format('Heuristics: lambda %.6f / enc LR %.6f / dec LR %.6f, units on %.4f',torch.Tensor(lam_heur)[{{-30,-1}}]:mean(),torch.Tensor(lre_heur)[{{-30,-1}}]:mean(),torch.Tensor(lrd_heur)[{{-40,-1}}]:mean(), torch.Tensor(units_on):mean()))
@@ -189,8 +190,8 @@ for epoch = 1,Nepoch do
    --print(dec:get(1).weight[{1,1}])
    print("=====")
    --image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
-   wt = enc:get(1).weight
-   plotweights(string.format('filters_%03d.png', epoch), wt)
+   plotweights(string.format('enc_filt_%03d.png', epoch), enc:get(1).weight)
+   plotweights(string.format('dec_filt_%03d.png', epoch), dec:get(1).weight)
    if epoch==1 then
        imgs = {}
        imgs[1] = image.toDisplayTensor(X_batch,2,1) 
