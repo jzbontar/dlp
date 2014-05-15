@@ -13,11 +13,11 @@ torch.manualSeed(42)
 
 nhidden = 32
 batch_size = 16
-lambda_l1= 0 -- 1e-5 --0.0001 -- lambda. Beta=1
+lambda_l1= 1e-5 --0.0001 -- lambda. Beta=1
 
 --LR = 5e-6 -- learning rate
-lrd = 5e-4
-lre = 5e-4
+lre = 1e-3
+lrd = 1e-2
 
 prof.tic('load')
 --X,Y = torch_datasets:cifar(3)
@@ -104,7 +104,7 @@ dpar, dgpar = dec:getParameters()
 lam_heur = {}
 lrd_heur = {}
 lre_heur = {}
-introsp = false
+introsp = true
 
 
 wt = enc:get(1).weight
@@ -158,7 +158,7 @@ for epoch = 1,Nepoch do
       -- DONTUSE print('sp '.. enc_sparse.gradInput:abs():mean() .. ', rec ' .. dec.gradInput:abs():mean())
       -- combine l1 and reconstruction backprop
       --gradInput = enc_sparse.gradInput:add(dec.gradInput)
-      --gradInput = dec.gradInput:add(lambda_l1, enc_sparse.gradInput)
+      gradInput = dec.gradInput:add(lambda_l1, enc_sparse.gradInput)
       gradInput = dec.gradInput
       enc:backward(X_batch, gradInput)
       if introsp then
@@ -169,8 +169,6 @@ for epoch = 1,Nepoch do
       -- update parameters
       epar:add(-lre, egpar)
       dpar:add(-lrd, dgpar)
-      --epar:add(1,torch.CudaTensor(2432):normal())
-      --dpar:add(1,torch.CudaTensor(12816):normal())
       --print(reconstruct_cost.output, torch.abs(egpar:double()):mean(), torch.abs(dgpar:double()):mean())
 
       -- normalize decoder kernels
