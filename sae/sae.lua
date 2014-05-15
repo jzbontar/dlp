@@ -17,7 +17,9 @@ lambda_l1= 1e-4 --0.0001 -- lambda. Beta=1
 
 --LR = 5e-6 -- learning rate
 lre = 5e-2
-lrd = 5e-1
+lrd = 5e-2
+NLRdec = 1
+LRdecay = 0.2
 
 prof.tic('load')
 --X,Y = torch_datasets:cifar(3)
@@ -104,8 +106,12 @@ dpar, dgpar = dec:getParameters()
 lam_heur = {}
 lrd_heur = {}
 lre_heur = {}
-introsp = true
+introsp = false
+Ltr = {}
+Lte = {}
 
+--function evaluate()
+--evaluate on testset?
 
 wt = enc:get(1).weight
 --image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
@@ -117,6 +123,7 @@ for epoch = 1,Nepoch do
    prof.tic('epoch')
    l1_coll = {}
    rec_coll = {}
+   loss_coll = {}
    units_on = {}
    for t = 1,N- batch_size, batch_size do
       prof.tic('batch')
@@ -134,7 +141,7 @@ for epoch = 1,Nepoch do
 
       enc_sparse:forward(enc.output)
       l1cost:forward(enc_sparse.output)
-      l1_coll[#l1_coll + 1] = l1cost.output/enc_sparse.output:nElement()
+      l1_coll[#l1_coll + 1] = l1cost.output -- /enc_sparse.output:nElement()
       l1cost:backward(enc_sparse.output)
       enc_sparse:backward(enc.output, l1cost.gradInput)
       -- DONTUSE print ('l1 gradInput: ' .. l1cost.gradInput:abs():mean() .. ' / maxpool gradInput: ' .. enc_sparse.gradInput:abs():mean())
@@ -145,6 +152,7 @@ for epoch = 1,Nepoch do
       center = X_batch:narrow(3,5,24):narrow(4,5,24)
       reconstruct_cost:forward(recout, center)
       rec_coll[#rec_coll + 1] = reconstruct_cost.output
+      loss_coll[#loss_coll +1] = reconstruct_cost.output + lambda_l1 * l1cost.output
       reconstruct_cost:backward(recout, center)
       dec:backward(enc.output, reconstruct_cost.gradInput)
 
@@ -180,16 +188,27 @@ for epoch = 1,Nepoch do
 
       prof.toc('batch')
    end
+
+   -- Evaluate and LR decay?
+   Ltr[#Ltr +1] = torch.Tensor(loss_coll):mean()
+   --evaluate()
+   if epoch > 2 and Ltr[#Ltr] >= Ltr[#Ltr-1] and Ltr[#Ltr] >= Ltr[#Ltr-2] then
+       if NLRdec ==3 then  break end                                                                            
+       NLRdec = NLRdec+1
+       lrd = lrd * LRdecay
+       lre = lre * LRdecay
+       print("LEARNING RATE DECAY..  NOW " .. lrd)
+   end
    prof.toc('epoch')
-   print(string.format('epoch %d, time %.2f, L1 %.5f, reconstr %.5f', epoch, prof.time()-tic, torch.Tensor(l1_coll):mean(), torch.Tensor(rec_coll):mean()))
+   -- print stats
+   print(string.format('epoch %d, time %.2f, lam L1 %.5f, reconstr %.5f, total loss %.5f', epoch, prof.time()-tic, lambda_l1 * torch.Tensor(l1_coll):mean(), torch.Tensor(rec_coll):mean(), Ltr[#Ltr]))
    print(string.format('gradInputs: sp %.4e / rec %.4e', torch.abs(enc_sparse.gradInput:double()):mean(), torch.abs(dec.gradInput:double()):mean()))
    print(string.format('average enc weight: %.4f / average dec weight: %.4f',torch.abs(epar:double()):mean(), torch.abs(dpar:double()):mean()))
    if introsp then
        print(string.format('Heuristics: lambda %.6f / enc LR %.6f / dec LR %.6f, units on %.4f',torch.Tensor(lam_heur)[{{-30,-1}}]:mean(),torch.Tensor(lre_heur)[{{-30,-1}}]:mean(),torch.Tensor(lrd_heur)[{{-40,-1}}]:mean(), torch.Tensor(units_on):mean()))
    end
-   --print(dec:get(1).weight[{1,1}])
    print("=====")
-   --image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
+   -- Save stuff
    plotweights(string.format('enc_filt_%03d.png', epoch), enc:get(1).weight)
    plotweights(string.format('dec_filt_%03d.png', epoch), dec:get(1).weight)
    if epoch==1 then
@@ -197,8 +216,6 @@ for epoch = 1,Nepoch do
        imgs[1] = image.toDisplayTensor(X_batch,2,1) 
    end
    imgs[#imgs+1] = image.toDisplayTensor(picpadder:forward(recout),2,1)
-   --image.save(string.format('orig_%02d.png',epoch), image.toDisplayTensor(X_batch,2))
-   --image.save(string.format('reco_%02d.png',epoch), image.toDisplayTensor(recout,2))
    image.save('reconstruction.png', image.toDisplayTensor(imgs, 0, #imgs))
 end
 prof.toc('train')
