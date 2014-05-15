@@ -9,17 +9,6 @@ require 'prof-torch'
 prof.clear()
 
 cutorch.setDevice(1)
-torch.manualSeed(23442)
-
-nhidden = 32
-batch_size = 16
-lambda_l1= 1e-4 --0.0001 -- lambda. Beta=1
-
---LR = 5e-6 -- learning rate
-lre = 5e-2
-lrd = 5e-2
-NLRdec = 1
-LRdecay = 0.2
 
 prof.tic('load')
 --X,Y = torch_datasets:cifar(3)
@@ -27,10 +16,29 @@ X = torch.FloatTensor(torch.FloatStorage('/home/tom/datasets/cifar_whitened/X'))
 collectgarbage() -- in case of re-run several times
 
 N = N or 50000
---N = N or 10240
-Nepoch = Nepoch or 20
+--N = N or 1024
+Nepoch = Nepoch or 50
 X = X[{{1,N}}]
 prof.toc('load')
+
+
+nhidden = 32
+batch_size = 16
+--lambda_l1= 1e-4 --0.0001 -- lambda. Beta=1
+lamvals = {1.77827941e-05,   3.16227766e-05, 5.62341325e-05,   1.00000000e-04,   1.77827941e-04, 3.16227766e-04,   5.62341325e-04 }
+for lami = 1,#lamvals do
+lambda_l1 = lamvals[lami]
+print()
+print()
+print("RUNNING WITH LAMBDA = " .. lambda_l1)
+print(" ================== ")
+torch.manualSeed(23442)
+--LR = 5e-6 -- learning rate
+lre = 5e-2
+lrd = 5e-2
+NLRdec = 1
+LRdecay = 0.2
+
 
 --enc = nn.Sequential{bprop_min=1}
 enc = nn.Sequential()
@@ -110,13 +118,14 @@ introsp = false
 Ltr = {}
 Lte = {}
 
+collectgarbage() -- in case of re-run several times
 --function evaluate()
 --evaluate on testset?
 
 wt = enc:get(1).weight
 --image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
-plotweights(string.format('enc_filt_%03d.png', 0), enc:get(1).weight)
-plotweights(string.format('dec_filt_%03d.png', 0), dec:get(1).weight)
+plotweights(string.format('enc_%.7f_filt_%03d.png', lambda_l1, 0), enc:get(1).weight)
+plotweights(string.format('dec_%.7f_filt_%03d.png', lambda_l1, 0), dec:get(1).weight)
 for epoch = 1,Nepoch do
    -- train
    tic= prof.time()
@@ -209,14 +218,19 @@ for epoch = 1,Nepoch do
    end
    print("=====")
    -- Save stuff
-   plotweights(string.format('enc_filt_%03d.png', epoch), enc:get(1).weight)
-   plotweights(string.format('dec_filt_%03d.png', epoch), dec:get(1).weight)
+   plotweights(string.format('enc_%.7f_filt_%03d.png', lambda_l1, epoch), enc:get(1).weight)
+   plotweights(string.format('dec_%.7f_filt_%03d.png', lambda_l1, epoch), dec:get(1).weight)
    if epoch==1 then
        imgs = {}
        imgs[1] = image.toDisplayTensor(X_batch,2,1) 
    end
    imgs[#imgs+1] = image.toDisplayTensor(picpadder:forward(recout),2,1)
-   image.save('reconstruction.png', image.toDisplayTensor(imgs, 0, #imgs))
+   image.save(string.format('reconstruction_%.7f.png',lambda_l1), image.toDisplayTensor(imgs, 0, #imgs))
 end
+finalimgs = {imgs[1], imgs[#imgs]}
+image.save(string.format('finalreconstruction_%.7f.png',lambda_l1), image.toDisplayTensor(finalimgs, 0, #finalimgs))
 prof.toc('train')
+torch.save(string.format('enc_%.7f.net',lambda_l1), enc)
+torch.save(string.format('dec_%.7f.net',lambda_l1), dec)
 prof.dump()
+end
