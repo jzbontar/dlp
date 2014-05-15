@@ -18,6 +18,7 @@ collectgarbage() -- in case of re-run several times
 N = N or 50000
 --N = N or 1024
 Nepoch = Nepoch or 50
+Xte = X[{{50001,60000}}]
 X = X[{{1,N}}]
 prof.toc('load')
 
@@ -116,16 +117,38 @@ lrd_heur = {}
 lre_heur = {}
 introsp = false
 Ltr = {}
+L1te = {}
+Lrecte = {}
 Lte = {}
 
 collectgarbage() -- in case of re-run several times
---function evaluate()
---evaluate on testset?
 
-wt = enc:get(1).weight
+function evaluate(Xte, bs, enc, dec, enc_sparse, l1cost, reconstruct_cost)
+    local Xb, center, l1coll, reccoll
+    l1coll = {}
+    reccoll= {}
+    for t = 1,Xte:size()[1]-bs, bs do
+        Xb = Xte:narrow(1,t,bs)
+        enc:forward(Xb)
+        enc_sparse:forward(enc.output)
+        l1cost:forward(enc_sparse.output)
+        dec:forward(enc.output)
+        center = Xb:narrow(3,5,24):narrow(4,5,24)
+        reconstruct_cost:forward(dec.output, center)
+        l1coll[#l1coll+1] = l1cost.output
+        reccoll[#reccoll+1] = reconstruct_cost.output
+    end
+    L1te[#L1te+1] = torch.Tensor(l1coll):mean()
+    Lrecte[#Lrecte+1] = torch.Tensor(reccoll):mean()
+    Lte[#Lte+1] = Lrecte[#Lrecte] + lambda_l1 * L1te[#L1te]
+end
+
 --image.save(string.format('filters_%03d.jpg', epoch), image.toDisplayTensor({wt[{{},1}], wt[{{},2}], wt[{{},3}]}, 2, 14))
 plotweights(string.format('enc_%.7f_filt_%03d.png', lambda_l1, 0), enc:get(1).weight)
 plotweights(string.format('dec_%.7f_filt_%03d.png', lambda_l1, 0), dec:get(1).weight)
+evaluate(Xte, batch_size, enc, dec, enc_sparse, l1cost, reconstruct_cost)
+print(string.format("Pre-train Test set evaluation: rec %.6f, lam*L1 %.6f,  total loss %.6f",Lrecte[#Lrecte], lambda_l1 * L1te[#L1te], Lte[#Lte]))
+
 for epoch = 1,Nepoch do
    -- train
    tic= prof.time()
@@ -197,21 +220,24 @@ for epoch = 1,Nepoch do
 
       prof.toc('batch')
    end
-
+   prof.toc('epoch')
    -- Evaluate and LR decay?
    Ltr[#Ltr +1] = torch.Tensor(loss_coll):mean()
-   --evaluate()
-   if epoch > 2 and Ltr[#Ltr] >= Ltr[#Ltr-1] and Ltr[#Ltr] >= Ltr[#Ltr-2] then
+   prof.tic('evaluate')
+   evaluate(Xte, batch_size, enc, dec, enc_sparse, l1cost, reconstruct_cost)
+   prof.toc('evaluate')
+   -- decay?
+   if epoch > 2 and Lte[#Lte] >= Lte[#Lte-1] and Lte[#Lte] >= Lte[#Lte-2] then
        if NLRdec ==3 then  break end                                                                            
        NLRdec = NLRdec+1
        lrd = lrd * LRdecay
        lre = lre * LRdecay
        print("LEARNING RATE DECAY..  NOW " .. lrd)
    end
-   prof.toc('epoch')
    -- print stats
-   print(string.format('epoch %d, time %.2f, lam L1 %.5f, reconstr %.5f, total loss %.5f', epoch, prof.time()-tic, lambda_l1 * torch.Tensor(l1_coll):mean(), torch.Tensor(rec_coll):mean(), Ltr[#Ltr]))
-   print(string.format('gradInputs: sp %.4e / rec %.4e', torch.abs(enc_sparse.gradInput:double()):mean(), torch.abs(dec.gradInput:double()):mean()))
+   print(string.format('epoch %d, time %.2f,  rec %.6f, lam*L1 %.6f, total loss %.6f', epoch, prof.time()-tic, torch.Tensor(rec_coll):mean(),lambda_l1 * torch.Tensor(l1_coll):mean(),  Ltr[#Ltr]))
+   print(string.format("Test set:             rec %.6f, lam*L1 %.6f, total loss %.6f",Lrecte[#Lrecte], lambda_l1 * L1te[#L1te], Lte[#Lte]))
+   --print(string.format('gradInputs: sp %.4e / rec %.4e', torch.abs(enc_sparse.gradInput:double()):mean(), torch.abs(dec.gradInput:double()):mean()))
    print(string.format('average enc weight: %.4f / average dec weight: %.4f',torch.abs(epar:double()):mean(), torch.abs(dpar:double()):mean()))
    if introsp then
        print(string.format('Heuristics: lambda %.6f / enc LR %.6f / dec LR %.6f, units on %.4f',torch.Tensor(lam_heur)[{{-30,-1}}]:mean(),torch.Tensor(lre_heur)[{{-30,-1}}]:mean(),torch.Tensor(lrd_heur)[{{-40,-1}}]:mean(), torch.Tensor(units_on):mean()))
