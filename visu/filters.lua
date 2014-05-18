@@ -119,6 +119,6 @@ for i = 1,3 do
 end
 
 im = image.toDisplayTensor(rows,0,1)
-image.save(string.format('filters_lam_%.6f.png', lambda_l1),im)
+image.save(string.format('filters_sm_lam_%.6f.png', lambda_l1),im)
 
 end

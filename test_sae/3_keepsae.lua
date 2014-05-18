@@ -83,7 +83,7 @@ function evaluate()
     err_te = err_te/X_te:size()[1]
     Ete[#Ete+1] = err_te
 end
-
+--assert(true==false)
 prof.tic('train')
 print('start training phase')
 Etr= {}
